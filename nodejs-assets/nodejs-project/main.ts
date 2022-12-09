@@ -1,10 +1,11 @@
-const rn_bridge = require('rn-bridge');
 import WebTorrent from 'webtorrent';
 import express from 'express';
 import fs from 'fs';
 import cors from 'cors';
 import throttle from 'lodash.throttle';
 import jsonfile from 'jsonfile';
+
+const rn_bridge = require('rn-bridge');
 
 function log(...args) {
     rn_bridge.channel.send({
@@ -30,44 +31,48 @@ class TorrentClient {
 
     downloadTorrent(magnetUri, location) {
         console.log('Starting torrent', this.callbackId);
-        this.client.add(magnetUri, { path: location }, (torrent) => {
-            // Got torrent metadata!
-            rn_bridge.channel.send({
-                callbackId: this.callbackId,
-                name: 'torrent-metadata',
-                size: torrent.length,
-            });
-            this.torrent = torrent;
-            console.log('Torrent client is downloading:', torrent.infoHash);
-            console.log(
-                'Torrent data, file path:',
-                torrent.files[0].path,
-                'file name:',
-                torrent.files[0].name,
-            );
-            const throttledDownloadHandler = throttle(() => {
+        this.client.add(
+            magnetUri,
+            { path: location },
+            (torrent: WebTorrent.Torrent) => {
+                // Got torrent metadata!
                 rn_bridge.channel.send({
                     callbackId: this.callbackId,
-                    name: 'torrent-progress',
-                    downloaded: torrent.downloaded,
-                    downloadSpeed: torrent.downloadSpeed,
-                    uploadSpeed: torrent.uploadSpeed,
-                    progress: torrent.progress,
+                    name: 'torrent-metadata',
+                    size: torrent.length,
                 });
-            }, 1000);
-            torrent.on('download', (bytes) => {
-                throttledDownloadHandler();
-            });
-            torrent.on('done', () => {
-                console.log('Torrent downloaded');
-                rn_bridge.channel.send({
-                    name: 'torrent-done',
-                    callbackId: this.callbackId,
-                    sourceFilePath: torrent.files[0].path,
-                    sourceFileName: torrent.files[0].name,
+                this.torrent = torrent;
+                console.log('Torrent client is downloading:', torrent.infoHash);
+                console.log(
+                    'Torrent data, file path:',
+                    torrent.files[0].path,
+                    'file name:',
+                    torrent.files[0].name,
+                );
+                const throttledDownloadHandler = throttle(() => {
+                    rn_bridge.channel.send({
+                        callbackId: this.callbackId,
+                        name: 'torrent-progress',
+                        downloaded: torrent.downloaded,
+                        downloadSpeed: torrent.downloadSpeed,
+                        uploadSpeed: torrent.uploadSpeed,
+                        progress: torrent.progress,
+                    });
+                }, 1000);
+                torrent.on('download', (bytes) => {
+                    throttledDownloadHandler();
                 });
-            });
-        });
+                torrent.on('done', () => {
+                    console.log('Torrent downloaded');
+                    rn_bridge.channel.send({
+                        name: 'torrent-done',
+                        callbackId: this.callbackId,
+                        sourceFilePath: torrent.files[0].path,
+                        sourceFileName: torrent.files[0].name,
+                    });
+                });
+            },
+        );
     }
 
     pause() {
